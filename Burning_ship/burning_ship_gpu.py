@@ -584,6 +584,8 @@ def apply_preset(args: argparse.Namespace):
             args.max_iterations = preset['max_iterations']
         if 'save_annotated' in preset:
             args.save_annotated = preset['save_annotated']
+        if 'no_show' in preset:
+            args.no_show = preset['no_show']
 
         print(f"Using preset: {args.preset}")
         print(f"  Region: [{args.xmin}, {args.xmax}] × [{args.ymin}, {args.ymax}]")
