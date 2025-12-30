@@ -116,6 +116,140 @@ def burning_ship_gpu(params: FractalParams, device: str = 'mps') -> np.ndarray:
     return result
 
 
+def burning_ship_gpu_tiled(params: FractalParams, device: str = 'mps', tile_size: int = 8192) -> np.ndarray:
+    """
+    Generate Burning Ship fractal using GPU acceleration with tiled rendering.
+
+    Splits the image into tiles to reduce memory usage for large renders.
+
+    Args:
+        params: Fractal generation parameters
+        device: Device to use ('mps' for Metal on M-series, 'cuda' for NVIDIA, 'cpu' fallback)
+        tile_size: Size of square tiles (default 8192x8192)
+
+    Returns:
+        2D numpy array of iteration counts
+    """
+    print(f"Generating {params.width}x{params.height} fractal on {device.upper()} using tiled rendering...")
+    print(f"  Tile size: {tile_size}x{tile_size}")
+
+    # Calculate number of tiles needed
+    tiles_x = (params.width + tile_size - 1) // tile_size
+    tiles_y = (params.height + tile_size - 1) // tile_size
+    total_tiles = tiles_x * tiles_y
+
+    print(f"  Grid: {tiles_x}x{tiles_y} tiles ({total_tiles} total)")
+
+    # Allocate result array on CPU
+    result = np.zeros((params.height, params.width), dtype=np.int32)
+
+    # Create coordinate arrays on CPU
+    x = np.linspace(params.xmin, params.xmax, params.width, dtype=np.float32)
+    y = np.linspace(params.ymin, params.ymax, params.height, dtype=np.float32)
+
+    overall_start_time = time.time()
+    tile_num = 0
+
+    # Process each tile
+    for tile_y in range(tiles_y):
+        for tile_x in range(tiles_x):
+            tile_num += 1
+
+            # Calculate tile boundaries
+            y_start = tile_y * tile_size
+            y_end = min(y_start + tile_size, params.height)
+            x_start = tile_x * tile_size
+            x_end = min(x_start + tile_size, params.width)
+
+            tile_height = y_end - y_start
+            tile_width = x_end - x_start
+
+            print(f"\n[Tile {tile_num}/{total_tiles}] Processing region [{x_start}:{x_end}, {y_start}:{y_end}] ({tile_width}x{tile_height})")
+
+            # Extract coordinate ranges for this tile
+            x_tile = x[x_start:x_end]
+            y_tile = y[y_start:y_end]
+
+            # Create meshgrid for tile
+            y_grid_tile, x_grid_tile = np.meshgrid(y_tile, x_tile, indexing='ij')
+
+            # Convert to torch tensors and move to GPU
+            x_grid = torch.from_numpy(x_grid_tile).to(device)
+            y_grid = torch.from_numpy(y_grid_tile).to(device)
+
+            # Initialize for this tile
+            c_real = x_grid
+            c_imag = y_grid
+            z_real = torch.zeros_like(c_real)
+            z_imag = torch.zeros_like(c_imag)
+            iterations = torch.zeros((tile_height, tile_width), dtype=torch.int32, device=device)
+            mask = torch.ones((tile_height, tile_width), dtype=torch.bool, device=device)
+
+            escape_radius_sq = params.escape_radius ** 2
+
+            tile_start_time = time.time()
+
+            # Iterate the Burning Ship formula
+            with tqdm(total=params.max_iterations, desc=f"  Tile {tile_num}/{total_tiles}", unit="iter") as pbar:
+                for i in range(params.max_iterations):
+                    # Burning Ship: take absolute values
+                    z_real_abs = torch.abs(z_real)
+                    z_imag_abs = torch.abs(z_imag)
+
+                    # Square: (a + bi)^2 = a^2 - b^2 + 2abi
+                    z_real_new = z_real_abs * z_real_abs - z_imag_abs * z_imag_abs + c_real
+                    z_imag_new = 2 * z_real_abs * z_imag_abs + c_imag
+
+                    z_real = z_real_new
+                    z_imag = z_imag_new
+
+                    # Check for escape
+                    z_magnitude_sq = z_real * z_real + z_imag * z_imag
+                    escaped = (z_magnitude_sq > escape_radius_sq) & mask
+
+                    # Update iteration counts
+                    iterations[escaped] = i
+                    mask = mask & ~escaped
+
+                    # Update progress
+                    active_pixels = mask.sum().item()
+                    pbar.set_postfix({'active': f"{active_pixels:,}"})
+                    pbar.update(1)
+
+                    # Early exit if all points escaped
+                    if active_pixels == 0:
+                        print(f"    ✓ All points escaped by iteration {i}")
+                        pbar.close()
+                        break
+
+            # Points that never escaped get max_iterations
+            iterations[mask] = params.max_iterations
+
+            # Copy tile result back to CPU and into result array
+            result[y_start:y_end, x_start:x_end] = iterations.cpu().numpy()
+
+            tile_elapsed = time.time() - tile_start_time
+            tile_pixels = tile_width * tile_height
+            print(f"    ✓ Tile completed in {tile_elapsed:.2f}s ({tile_pixels/tile_elapsed:,.0f} pixels/sec)")
+
+            # Clean up GPU memory for this tile
+            del x_grid, y_grid, c_real, c_imag, z_real, z_imag, iterations, mask
+            if device == 'mps':
+                torch.mps.empty_cache()
+            elif device == 'cuda':
+                torch.cuda.empty_cache()
+
+    overall_elapsed = time.time() - overall_start_time
+    total_pixels = params.width * params.height
+
+    print(f"\n✓ Tiled GPU calculation completed in {overall_elapsed:.2f} seconds")
+    print(f"  Total pixels: {total_pixels:,}")
+    print(f"  Overall pixels/second: {total_pixels/overall_elapsed:,.0f}")
+    print(f"  Average time per tile: {overall_elapsed/total_tiles:.2f}s")
+
+    return result
+
+
 def adjust_aspect_ratio(xmin: float, xmax: float, ymin: float, ymax: float,
                         width: int, height: int, adjust_axis: str) -> tuple[float, float, float, float]:
     """
@@ -199,6 +333,107 @@ def get_device() -> str:
         return 'cpu'
 
 
+def estimate_memory_usage(width: int, height: int) -> int:
+    """
+    Estimate GPU memory usage in bytes for a single-pass render.
+
+    Args:
+        width: Image width in pixels
+        height: Image height in pixels
+
+    Returns:
+        Estimated memory usage in bytes
+    """
+    total_pixels = width * height
+
+    # Persistent tensors (fp32 = 4 bytes, int32 = 4 bytes, bool = 1 byte)
+    memory_bytes = 0
+    memory_bytes += total_pixels * 4  # x_grid
+    memory_bytes += total_pixels * 4  # y_grid
+    memory_bytes += total_pixels * 4  # z_real
+    memory_bytes += total_pixels * 4  # z_imag
+    memory_bytes += total_pixels * 4  # iterations
+    memory_bytes += total_pixels * 1  # mask
+
+    # Temporary tensors in iteration loop (worst case all exist simultaneously)
+    memory_bytes += total_pixels * 4  # z_real_abs
+    memory_bytes += total_pixels * 4  # z_imag_abs
+    memory_bytes += total_pixels * 4  # z_real_new
+    memory_bytes += total_pixels * 4  # z_imag_new
+    memory_bytes += total_pixels * 4  # z_magnitude_sq
+    memory_bytes += total_pixels * 1  # escaped
+
+    # Add 20% safety margin for PyTorch overhead
+    memory_bytes = int(memory_bytes * 1.2)
+
+    return memory_bytes
+
+
+def get_available_gpu_memory(device: str) -> int:
+    """
+    Get available GPU memory in bytes.
+
+    Args:
+        device: Device string ('mps', 'cuda', or 'cpu')
+
+    Returns:
+        Available memory in bytes, or a large value for CPU
+    """
+    if device == 'cuda':
+        # CUDA provides direct memory query
+        return torch.cuda.get_device_properties(0).total_memory
+    elif device == 'mps':
+        # MPS uses unified memory - estimate based on system RAM
+        # For M-series Macs, unified memory is shared
+        # Conservative estimate: assume 50% of system RAM available for GPU
+        import os
+        import platform
+        if platform.system() == 'Darwin':
+            # Get total physical memory on macOS
+            total_memory = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+            # Use 50% as conservative estimate for GPU operations
+            return total_memory // 2
+        else:
+            # Fallback: assume 16GB available
+            return 16 * 1024 * 1024 * 1024
+    else:
+        # CPU - return large value to effectively disable tiling by default
+        return 100 * 1024 * 1024 * 1024  # 100GB
+
+
+def should_use_tiling(width: int, height: int, device: str, disable_tiling: bool) -> bool:
+    """
+    Determine whether to use tiled rendering based on memory constraints.
+
+    Args:
+        width: Image width in pixels
+        height: Image height in pixels
+        device: Device string ('mps', 'cuda', or 'cpu')
+        disable_tiling: User override to disable tiling
+
+    Returns:
+        True if tiling should be used, False otherwise
+    """
+    if disable_tiling:
+        return False
+
+    estimated_usage = estimate_memory_usage(width, height)
+    available_memory = get_available_gpu_memory(device)
+
+    # Use tiling if estimated usage exceeds 70% of available memory
+    threshold = 0.7 * available_memory
+
+    use_tiling = estimated_usage > threshold
+
+    if use_tiling:
+        print(f"ℹ Auto-enabling tiled rendering:")
+        print(f"  Estimated memory: {estimated_usage / (1024**3):.2f} GB")
+        print(f"  Available memory: {available_memory / (1024**3):.2f} GB")
+        print(f"  Threshold (70%): {threshold / (1024**3):.2f} GB")
+
+    return use_tiling
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for GPU version."""
     parser = argparse.ArgumentParser(
@@ -253,8 +488,12 @@ def parse_arguments() -> argparse.Namespace:
                        help='Height of annotated version in pixels')
 
     # Presets
-    parser.add_argument('--preset', type=str, choices=['full', 'ship', 'antenna', '4k', '8k', '16k', 'lower', 'lower_zoom', 'lower_zoom_ship'],
+    parser.add_argument('--preset', type=str, choices=['full', 'ship', '4k', '8k', '16k', 'lower', 'lower_zoom', 'lower_zoom_ship'],
                        help='Use a preset region (overrides x/y min/max)')
+
+    # Performance options
+    parser.add_argument('--disable-tiling', action='store_true',
+                       help='Disable automatic tiling (use single-pass rendering)')
 
     return parser.parse_args()
 
@@ -271,14 +510,7 @@ def apply_preset(args: argparse.Namespace):
         'ship': {
             'xmin': -1.8, 'xmax': -1.6,  # X range = 0.2
             'ymin': -0.084374, 'ymax': 0.028126,  # Y range = 0.1125 for 16:9
-            'width': 3840, 'height': 2160,
-            'max_iterations': 300,
-            'save_annotated': True,
-        },
-        'antenna': {
-            'xmin': -1.755, 'xmax': -1.745,  # X range = 0.01
-            'ymin': 0.0221875, 'ymax': 0.0278125,  # Y range = 0.005625 for 16:9
-            'width': 3840, 'height': 2160,
+            'width': 15360*2, 'height': 8640*2,
             'max_iterations': 300,
             'save_annotated': True,
         },
@@ -322,7 +554,7 @@ def apply_preset(args: argparse.Namespace):
         'lower_zoom_ship': {
             'xmin': -0.84, 'xmax': -0.61 , 
             'ymin': -0.984 , 'ymax': -0.855,  
-            'width': int(15360*2), 'height': int(8640*2),  # 16:9 aspect ratio at ~16K
+            'width': int(15360*1), 'height': int(8640*1),  # 16:9 aspect ratio at ~16K
             'max_iterations': 500,
             'save_annotated': True,
             'no_show': True,
@@ -352,6 +584,8 @@ def apply_preset(args: argparse.Namespace):
             args.max_iterations = preset['max_iterations']
         if 'save_annotated' in preset:
             args.save_annotated = preset['save_annotated']
+        if 'no_show' in preset:
+            args.no_show = preset['no_show']
 
         print(f"Using preset: {args.preset}")
         print(f"  Region: [{args.xmin}, {args.xmax}] × [{args.ymin}, {args.ymax}]")
@@ -401,8 +635,14 @@ def main():
     # Detect best device
     device = get_device()
 
+    # Determine whether to use tiled rendering
+    use_tiling = should_use_tiling(params.width, params.height, device, args.disable_tiling)
+
     # Generate fractal on GPU
-    fractal = burning_ship_gpu(params, device=device)
+    if use_tiling:
+        fractal = burning_ship_gpu_tiled(params, device=device, tile_size=8192)
+    else:
+        fractal = burning_ship_gpu(params, device=device)
 
     # Visualize (reuse from original script)
     print("Creating visualization...")

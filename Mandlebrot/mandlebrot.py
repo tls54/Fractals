@@ -7,7 +7,7 @@ from datetime import datetime as dt
 from time import time
 from colour_rules import powerColor, logColor, colour_functions
 
-# TODO: add y offset param.
+
 def generate_mandelbrot(width=1000, precision=500, colour_rule="powerColor", zoom=1.0, offset=0.65):
     """Generate a Mandelbrot set image.
 
