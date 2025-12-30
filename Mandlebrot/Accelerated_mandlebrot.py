@@ -430,6 +430,48 @@ def create_annotated_figure(fractal: np.ndarray, params: FractalParams) -> plt.F
         pad=15
     )
 
+    # Increase tick resolution for better region identification
+    x_range = params.xmax - params.xmin
+    y_range = params.ymax - params.ymin
+
+    # Calculate appropriate number of ticks based on range
+    # Aim for tick spacing of roughly 0.1 for normal views, adjust for zoomed views
+    num_x_ticks = max(10, min(20, int(x_range / 0.05)))
+    num_y_ticks = max(10, min(20, int(y_range / 0.05)))
+
+    x_ticks = np.linspace(params.xmin, params.xmax, num_x_ticks)
+    y_ticks = np.linspace(params.ymin, params.ymax, num_y_ticks)
+
+    ax.set_xticks(x_ticks)
+    ax.set_yticks(y_ticks)
+
+    # Format tick labels to show appropriate precision
+    if x_range < 0.01:
+        x_fmt = '%.6f'
+    elif x_range < 0.1:
+        x_fmt = '%.4f'
+    elif x_range < 1:
+        x_fmt = '%.3f'
+    else:
+        x_fmt = '%.2f'
+
+    if y_range < 0.01:
+        y_fmt = '%.6f'
+    elif y_range < 0.1:
+        y_fmt = '%.4f'
+    elif y_range < 1:
+        y_fmt = '%.3f'
+    else:
+        y_fmt = '%.2f'
+
+    ax.set_xticklabels([x_fmt % tick for tick in x_ticks], rotation=45, ha='right', fontsize=9)
+    ax.set_yticklabels([y_fmt % tick for tick in y_ticks], fontsize=9)
+
+    # Add minor ticks for even finer resolution
+    ax.minorticks_on()
+    ax.grid(True, which='major', alpha=0.3, linewidth=0.8)
+    ax.grid(True, which='minor', alpha=0.1, linewidth=0.4)
+
     # Add colorbar (skip for custom colours with RGB arrays)
     if not (params.custom_colour and CUSTOM_COLOURS_AVAILABLE and params.custom_colour in colour_functions):
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
