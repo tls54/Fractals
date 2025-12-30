@@ -107,7 +107,7 @@ Utility options:
 - `4k`: 3840×2160, 300 iterations
 - `8k`: 7680×4320, 400 iterations
 - `16k`: 15360×8640, 500 iterations
-- `ultra`: 30720×17280, 1000 iterations
+- `32k`: 30720×17280, 1000 iterations
 
 ## Available Iterators
 
@@ -235,7 +235,7 @@ python main.py --output antenna.png --iterator burning_ship \
   --max-iterations 400 --custom-colormap log
 ```
 
-### 8K Ultra High Resolution
+### 8K High Resolution
 ```bash
 python main.py --output fractal_8k.png --iterator mandelbrot \
   --preset 8k --colormap inferno

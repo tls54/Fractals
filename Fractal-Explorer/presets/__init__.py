@@ -1,13 +1,29 @@
 """
-Preset fractal iterators.
+Preset fractal iterators and coordinate bounds.
 
-This package contains pre-built iterator implementations for popular fractals.
+This package contains pre-built iterator implementations for popular fractals
+and coordinate presets for interesting regions.
 """
 
 from .mandelbrot_iterator import MandelbrotIterator
 from .burning_ship_iterator import BurningShipIterator
+from .coordinates import (
+    COORDINATE_PRESETS,
+    get_coordinate_preset,
+    get_coordinate_info,
+    list_coordinate_presets,
+    get_presets_by_fractal,
+)
 
-__all__ = ['MandelbrotIterator', 'BurningShipIterator']
+__all__ = [
+    'MandelbrotIterator',
+    'BurningShipIterator',
+    'COORDINATE_PRESETS',
+    'get_coordinate_preset',
+    'get_coordinate_info',
+    'list_coordinate_presets',
+    'get_presets_by_fractal',
+]
 
 
 # Registry of available iterators

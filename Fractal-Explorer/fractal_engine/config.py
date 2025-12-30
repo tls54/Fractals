@@ -123,10 +123,10 @@ class FractalConfig:
                 'max_iterations': 100,
                 'dpi': 100,
             },
-            'ultra': {
+            '32k': {
                 'width': 30720,
                 'height': 17280,
-                'max_iterations': 1000,
+                'max_iterations': 500,
                 'dpi': 300,
             },
         }

@@ -17,7 +17,14 @@ from typing import Optional
 
 from fractal_engine import FractalConfig, FractalEngine
 from fractal_engine.colormap import get_available_colormaps
-from presets import get_iterator, list_iterators, ITERATOR_REGISTRY
+from presets import (
+    get_iterator,
+    list_iterators,
+    ITERATOR_REGISTRY,
+    get_coordinate_preset,
+    get_coordinate_info,
+    list_coordinate_presets,
+)
 
 
 def create_config_from_args(args) -> FractalConfig:
@@ -36,7 +43,18 @@ def create_config_from_args(args) -> FractalConfig:
     else:
         config = FractalConfig()
 
-    # Apply bounds if specified
+    # Apply coordinate preset if specified
+    if args.coords:
+        try:
+            xmin, xmax, ymin, ymax = get_coordinate_preset(args.coords)
+            config.xmin = xmin
+            config.xmax = xmax
+            config.ymin = ymin
+            config.ymax = ymax
+        except ValueError as e:
+            raise ValueError(f"Invalid coordinate preset: {e}")
+
+    # Apply individual bounds if specified (these override preset)
     if args.xmin is not None:
         config.xmin = args.xmin
     if args.xmax is not None:
@@ -133,15 +151,20 @@ Available iterators: """ + ', '.join(list_iterators())
     parser.add_argument(
         '--preset', '-p',
         type=str,
-        help='Configuration preset (default, 4k, 8k, 16k, fast, ultra)'
+        help='Configuration preset (default, 4k, 8k, 16k, fast, 32k)'
     )
 
     # Complex plane bounds
     bounds_group = parser.add_argument_group('complex plane bounds')
-    bounds_group.add_argument('--xmin', type=float, help='Minimum real value')
-    bounds_group.add_argument('--xmax', type=float, help='Maximum real value')
-    bounds_group.add_argument('--ymin', type=float, help='Minimum imaginary value')
-    bounds_group.add_argument('--ymax', type=float, help='Maximum imaginary value')
+    bounds_group.add_argument(
+        '--coords',
+        type=str,
+        help='Coordinate preset name (e.g., mandelbrot_seahorse, burning_ship_ship). Use --list-coords to see all available presets.'
+    )
+    bounds_group.add_argument('--xmin', type=float, help='Minimum real value (overrides --coords)')
+    bounds_group.add_argument('--xmax', type=float, help='Maximum real value (overrides --coords)')
+    bounds_group.add_argument('--ymin', type=float, help='Minimum imaginary value (overrides --coords)')
+    bounds_group.add_argument('--ymax', type=float, help='Maximum imaginary value (overrides --coords)')
 
     # Resolution
     resolution_group = parser.add_argument_group('resolution')
@@ -230,6 +253,11 @@ Available iterators: """ + ', '.join(list_iterators())
         action='store_true',
         help='List all available colormaps and exit'
     )
+    parser.add_argument(
+        '--list-coords',
+        action='store_true',
+        help='List all available coordinate presets and exit'
+    )
 
     args = parser.parse_args()
 
@@ -254,6 +282,24 @@ Available iterators: """ + ', '.join(list_iterators())
             print(f"  {name}")
         return 0
 
+    if args.list_coords:
+        print("Available coordinate presets:\n")
+
+        # Group by fractal type
+        fractal_types = ['mandelbrot', 'burning_ship', 'generic']
+        for ftype in fractal_types:
+            presets = list_coordinate_presets(fractal_type=ftype)
+            if presets:
+                print(f"{ftype.upper()} presets:")
+                for name in presets:
+                    info = get_coordinate_info(name)
+                    bounds = info['bounds']
+                    desc = info['description']
+                    print(f"  {name:30s} - {desc}")
+                    print(f"    Bounds: [{bounds[0]}, {bounds[1]}] × [{bounds[2]}, {bounds[3]}]")
+                print()
+        return 0
+
     # Create configuration
     try:
         config = create_config_from_args(args)
@@ -266,8 +312,8 @@ Available iterators: """ + ', '.join(list_iterators())
         iterator_class = get_iterator(args.iterator)
         iterator = iterator_class()
 
-        # Use iterator's default bounds if not specified
-        if args.xmin is None and args.xmax is None and args.ymin is None and args.ymax is None and not args.preset:
+        # Use iterator's default bounds if not specified and no coordinate preset used
+        if args.xmin is None and args.xmax is None and args.ymin is None and args.ymax is None and not args.preset and not args.coords:
             bounds = iterator.default_bounds
             config.xmin, config.xmax, config.ymin, config.ymax = bounds
             print(f"Using default bounds for {iterator.name}: [{bounds[0]}, {bounds[1]}] × [{bounds[2]}, {bounds[3]}]")
