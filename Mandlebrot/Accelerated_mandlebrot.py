@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Mandelbrot Set Generator - GPU Accelerated Version
 Uses PyTorch with Metal Performance Shaders for M-series Macs
@@ -689,7 +688,7 @@ def apply_preset(args: argparse.Namespace):
         'seahorse': {
             'xmin': -0.75, 'xmax': -0.735,
             'ymin': 0.095, 'ymax': 0.105,
-            'width': 1920, 'height': 1080,
+            'width': 7680, 'height': 4320,
             'max_iterations': 500,
             'save_annotated': True,
         },
