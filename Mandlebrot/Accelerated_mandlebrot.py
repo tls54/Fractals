@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Mandelbrot Set Generator - GPU Accelerated Version
 Uses PyTorch with Metal Performance Shaders for M-series Macs
